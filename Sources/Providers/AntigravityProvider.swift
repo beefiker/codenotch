@@ -107,9 +107,10 @@ actor AntigravityProvider: UsageProvider {
         // usage panel shows.
         if let windows = await localQuota(), !windows.isEmpty {
             everBridged = true
+            let headlineID = windows.first(where: { $0.id == "gemini-5h" })?.id ?? "gemini-weekly"
             return ProviderSnapshot(id: id, displayName: displayName, glyph: glyph,
                                     fidelity: .official, status: .ok, windows: windows,
-                                    headlineID: "gemini-weekly")
+                                    headlineID: headlineID)
         }
 
         // Antigravity has answered before and is not answering now: keep the

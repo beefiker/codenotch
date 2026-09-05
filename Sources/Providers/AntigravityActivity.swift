@@ -16,9 +16,22 @@ struct AntigravityActivity: Equatable {
     let requestsToday: Int
     let lastRequest: Date?
 
+    static var candidateRoots: [URL] {
+        let home = URL(fileURLWithPath: NSHomeDirectory())
+        return [
+            home.appendingPathComponent(".gemini/antigravity-cli/brain"),
+            home.appendingPathComponent(".gemini/antigravity/brain")
+        ]
+    }
+
     static var transcriptRoot: URL {
-        URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent(".gemini/antigravity/brain")
+        let manager = FileManager.default
+        for candidate in candidateRoots {
+            if manager.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return candidateRoots.first!
     }
 
     /// A step the model actually answered. User input and system checkpoints
@@ -26,39 +39,50 @@ struct AntigravityActivity: Equatable {
     /// work the model never did.
     private static let modelSource = "MODEL"
 
-    static func read(root: URL = transcriptRoot, now: Date = Date()) -> AntigravityActivity {
+    static func read(roots: [URL] = candidateRoots, now: Date = Date()) -> AntigravityActivity {
         let manager = FileManager.default
-        guard let trajectories = try? manager.contentsOfDirectory(
-            at: root, includingPropertiesForKeys: nil
-        ) else { return AntigravityActivity(requestsToday: 0, lastRequest: nil) }
-
         var today = 0
         var latest: Date?
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
+        var seenTranscripts = Set<String>()
 
-        for trajectory in trajectories {
-            let transcript = trajectory
-                .appendingPathComponent(".system_generated/logs/transcript.jsonl")
-            guard let text = try? String(contentsOf: transcript, encoding: .utf8) else { continue }
+        for root in roots {
+            guard let trajectories = try? manager.contentsOfDirectory(
+                at: root, includingPropertiesForKeys: nil
+            ) else { continue }
 
-            for line in text.split(separator: "\n") {
-                guard let data = line.data(using: .utf8),
-                      let step = try? JSONDecoder().decode(Step.self, from: data),
-                      step.source == modelSource,
-                      let at = parse(step.created_at)
-                else { continue }
+            for trajectory in trajectories {
+                let transcript = trajectory
+                    .appendingPathComponent(".system_generated/logs/transcript.jsonl")
+                let canonical = transcript.resolvingSymlinksInPath().path
+                guard !seenTranscripts.contains(canonical) else { continue }
+                seenTranscripts.insert(canonical)
 
-                if latest == nil || at > latest! { latest = at }
-                // `created_at` is UTC — the trailing Z is not decoration. The
-                // comparison has to be against the *local* day, which is what
-                // `isDate(_:inSameDayAs:)` on a local calendar does; treating
-                // the timestamp as local instead would move every count either
-                // side of midnight by the offset.
-                if calendar.isDate(at, inSameDayAs: now) { today += 1 }
+                guard let text = try? String(contentsOf: transcript, encoding: .utf8) else { continue }
+
+                for line in text.split(separator: "\n") {
+                    guard let data = line.data(using: .utf8),
+                          let step = try? JSONDecoder().decode(Step.self, from: data),
+                          step.source == modelSource,
+                          let at = parse(step.created_at)
+                    else { continue }
+
+                    if latest == nil || at > latest! { latest = at }
+                    // `created_at` is UTC — the trailing Z is not decoration. The
+                    // comparison has to be against the *local* day, which is what
+                    // `isDate(_:inSameDayAs:)` on a local calendar does; treating
+                    // the timestamp as local instead would move every count either
+                    // side of midnight by the offset.
+                    if calendar.isDate(at, inSameDayAs: now) { today += 1 }
+                }
             }
         }
         return AntigravityActivity(requestsToday: today, lastRequest: latest)
+    }
+
+    static func read(root: URL, now: Date = Date()) -> AntigravityActivity {
+        read(roots: [root], now: now)
     }
 
     private struct Step: Decodable {

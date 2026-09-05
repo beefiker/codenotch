@@ -15,19 +15,25 @@ final class AntigravityActivityMonitor: AgentActivityMonitor {
     @Published private(set) var sessions: [AgentSession] = []
     var sessionsPublisher: AnyPublisher<[AgentSession], Never> { $sessions.eraseToAnyPublisher() }
 
-    private let root: URL
+    private let roots: [URL]
     private let interval: TimeInterval
     /// How recently a transcript must have been written to count as live.
     /// Generous, because a model can think for a while between two lines.
     private let staleAfter: TimeInterval
     private var timer: Timer?
 
-    init(root: URL = AntigravityActivity.transcriptRoot,
+    init(roots: [URL] = AntigravityActivity.candidateRoots,
          interval: TimeInterval = 2,
          staleAfter: TimeInterval = 45) {
-        self.root = root
+        self.roots = roots
         self.interval = interval
         self.staleAfter = staleAfter
+    }
+
+    convenience init(root: URL,
+                     interval: TimeInterval = 2,
+                     staleAfter: TimeInterval = 45) {
+        self.init(roots: [root], interval: interval, staleAfter: staleAfter)
     }
 
     func start() {
@@ -46,25 +52,32 @@ final class AntigravityActivityMonitor: AgentActivityMonitor {
     }
 
     private func poll() {
-        let found = Self.read(root: root, staleAfter: staleAfter)
+        let found = Self.read(roots: roots, staleAfter: staleAfter)
         guard found != sessions else { return }
         sessions = found
     }
 
     static func read(root: URL, staleAfter: TimeInterval, now: Date = Date()) -> [AgentSession] {
-        let manager = FileManager.default
-        guard let trajectories = try? manager.contentsOfDirectory(
-            at: root, includingPropertiesForKeys: nil
-        ) else { return [] }
+        read(roots: [root], staleAfter: staleAfter, now: now)
+    }
 
+    static func read(roots: [URL], staleAfter: TimeInterval, now: Date = Date()) -> [AgentSession] {
+        let manager = FileManager.default
         var newest: (url: URL, modified: Date)?
-        for trajectory in trajectories {
-            let transcript = trajectory
-                .appendingPathComponent(".system_generated/logs/transcript.jsonl")
-            guard let modified = (try? manager.attributesOfItem(atPath: transcript.path))?[.modificationDate] as? Date
-            else { continue }
-            if newest == nil || modified > newest!.modified {
-                newest = (transcript, modified)
+
+        for root in roots {
+            guard let trajectories = try? manager.contentsOfDirectory(
+                at: root, includingPropertiesForKeys: nil
+            ) else { continue }
+
+            for trajectory in trajectories {
+                let transcript = trajectory
+                    .appendingPathComponent(".system_generated/logs/transcript.jsonl")
+                guard let modified = (try? manager.attributesOfItem(atPath: transcript.path))?[.modificationDate] as? Date
+                else { continue }
+                if newest == nil || modified > newest!.modified {
+                    newest = (transcript, modified)
+                }
             }
         }
 

@@ -185,6 +185,24 @@ final class AntigravityActivityTests: XCTestCase {
         XCTAssertEqual(AntigravityActivity(requestsToday: 0, lastRequest: nil).summary,
                        "no requests today")
     }
+
+    func testItReadsAcrossMultipleRoots() throws {
+        let root2 = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("antigravity-2-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root2, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root2) }
+
+        try write([step("2026-08-31T09:00:00Z", source: "MODEL")], trajectory: "a")
+
+        let dir2 = root2.appendingPathComponent("b/.system_generated/logs")
+        try FileManager.default.createDirectory(at: dir2, withIntermediateDirectories: true)
+        try step("2026-08-31T10:00:00Z", source: "MODEL")
+            .write(to: dir2.appendingPathComponent("transcript.jsonl"),
+                   atomically: true, encoding: .utf8)
+
+        let activity = AntigravityActivity.read(roots: [root, root2], now: noon)
+        XCTAssertEqual(activity.requestsToday, 2)
+    }
 }
 
 /// The quota parser is written from message names in Antigravity's binary, not
@@ -323,6 +341,25 @@ final class AntigravityBridgeTests: XCTestCase {
         XCTAssertTrue(AntigravityBridge.windows(in: Data("nonsense".utf8)).isEmpty)
     }
 
+    func testItDistinguishesMultiBucketGroups() {
+        let payload = Data("""
+        {"response":{"groups":[
+          {"displayName":"Gemini Models",
+           "buckets":[
+             {"bucketId":"gemini-weekly","displayName":"Weekly Limit Remaining",
+              "window":"weekly","remainingFraction":0.9},
+             {"bucketId":"gemini-5h","displayName":"Five Hour Limit Remaining",
+              "window":"5h","remainingFraction":0.7}
+           ]}]}}
+        """.utf8)
+        let windows = AntigravityBridge.windows(in: payload)
+        XCTAssertEqual(windows.count, 2)
+        XCTAssertEqual(windows[0].id, "gemini-5h")
+        XCTAssertEqual(windows[0].label, "Gemini Models (5h)")
+        XCTAssertEqual(windows[1].id, "gemini-weekly")
+        XCTAssertEqual(windows[1].label, "Gemini Models (Weekly)")
+    }
+
     // MARK: - Discovery
 
     /// The token is only ever on the command line: the server is started with
@@ -340,6 +377,20 @@ final class AntigravityBridgeTests: XCTestCase {
         )
         XCTAssertEqual(endpoint.csrfToken, "d4bd9204-bf02-4111-b1fe-71f0d0d921d0")
         XCTAssertEqual(endpoint.ports, [63881, 63882])
+    }
+
+    func testItDiscoversAgyCliWithoutCsrfToken() throws {
+        let table = """
+        10558 agy
+        """
+        let endpoint = try XCTUnwrap(
+            AntigravityBridge.discover(processTable: table, listeningPorts: { pid in
+                XCTAssertEqual(pid, 10558)
+                return [56490, 56491]
+            })
+        )
+        XCTAssertEqual(endpoint.csrfToken, "")
+        XCTAssertEqual(endpoint.ports, [56490, 56491])
     }
 
     func testNoAntigravityMeansNoEndpoint() {
@@ -578,6 +629,25 @@ final class AntigravityActivityMonitorTests: XCTestCase {
     func testNoTranscriptsIsQuietRatherThanAnError() {
         let absent = root.appendingPathComponent("nowhere")
         XCTAssertTrue(AntigravityActivityMonitor.read(root: absent, staleAfter: 45).isEmpty)
+    }
+
+    func testItReadsAcrossMultipleRoots() throws {
+        let root2 = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("agy-monitor-2-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root2, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root2) }
+
+        try transcript("old", modified: Date().addingTimeInterval(-600))
+
+        let dir2 = root2.appendingPathComponent("live2/.system_generated/logs")
+        try FileManager.default.createDirectory(at: dir2, withIntermediateDirectories: true)
+        let file2 = dir2.appendingPathComponent("transcript.jsonl")
+        try "{}".write(to: file2, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: file2.path)
+
+        let sessions = AntigravityActivityMonitor.read(roots: [root, root2], staleAfter: 45)
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(sessions.first?.id, "antigravity.live2")
     }
 }
 

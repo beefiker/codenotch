@@ -43,18 +43,44 @@ enum AntigravityBridge {
     static func discover(processTable: String? = nil, listeningPorts: ((Int) -> [Int])? = nil)
         -> Endpoint? {
         let table = processTable ?? run("/bin/ps", ["-Ao", "pid,command"])
-        guard let line = table.split(separator: "\n").first(where: {
+        let lines = table.split(separator: "\n")
+
+        // 1. Antigravity IDE / standalone language_server with --csrf_token
+        if let line = lines.first(where: {
             $0.contains("language_server") && $0.contains("--csrf_token")
-        }) else { return nil }
+        }) {
+            if let token = value(of: "--csrf_token", in: String(line)),
+               let pid = pid(from: line) {
+                let ports = listeningPorts?(pid) ?? self.listeningPorts(ofPID: pid)
+                if !ports.isEmpty {
+                    return Endpoint(ports: ports, csrfToken: token)
+                }
+            }
+        }
 
-        guard let token = value(of: "--csrf_token", in: String(line)),
-              let pid = Int(line.trimmingCharacters(in: .whitespaces)
-                  .split(separator: " ").first ?? "")
-        else { return nil }
+        // 2. Antigravity CLI (agy)
+        for line in lines {
+            guard isAgyProcess(line) else { continue }
+            guard let pid = pid(from: line) else { continue }
+            let ports = listeningPorts?(pid) ?? self.listeningPorts(ofPID: pid)
+            if !ports.isEmpty {
+                let token = value(of: "--csrf_token", in: String(line)) ?? ""
+                return Endpoint(ports: ports, csrfToken: token)
+            }
+        }
 
-        let ports = listeningPorts?(pid) ?? self.listeningPorts(ofPID: pid)
-        guard !ports.isEmpty else { return nil }
-        return Endpoint(ports: ports, csrfToken: token)
+        return nil
+    }
+
+    static func pid(from line: Substring) -> Int? {
+        Int(line.trimmingCharacters(in: .whitespaces).split(separator: " ").first ?? "")
+    }
+
+    static func isAgyProcess(_ line: Substring) -> Bool {
+        let parts = line.trimmingCharacters(in: .whitespaces).split(separator: " ")
+        guard parts.count >= 2 else { return false }
+        let binary = URL(fileURLWithPath: String(parts[1])).lastPathComponent
+        return binary == "agy"
     }
 
     static func value(of flag: String, in line: String) -> String? {
@@ -102,19 +128,23 @@ enum AntigravityBridge {
 
     private static func quota(port: Int, token: String,
                               session: URLSession) async throws -> [LimitWindow] {
+        if let windows = try? await requestQuota(scheme: "https", port: port, token: token, session: session),
+           !windows.isEmpty {
+            return windows
+        }
+        return try await requestQuota(scheme: "http", port: port, token: token, session: session)
+    }
+
+    private static func requestQuota(scheme: String, port: Int, token: String,
+                                     session: URLSession) async throws -> [LimitWindow] {
         var request = URLRequest(
-            url: URL(string: "https://127.0.0.1:\(port)\(service)")!
+            url: URL(string: "\(scheme)://127.0.0.1:\(port)\(service)")!
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(token, forHTTPHeaderField: csrfHeader)
-        // `forceRefresh` is why this reads as live rather than as whatever was
-        // last looked at. The language server keeps a `QuotaSummaryCache`, and
-        // an empty request is served from it — so the figure only moved when
-        // something else refreshed it, which in practice meant opening
-        // Antigravity's own Models & Usage panel and pressing its refresh
-        // button. The field is real: `RetrieveUserQuotaSummaryRequest` has a
-        // `GetForceRefresh` accessor.
+        if !token.isEmpty {
+            request.setValue(token, forHTTPHeaderField: csrfHeader)
+        }
         request.httpBody = Data(#"{"forceRefresh":true}"#.utf8)
         request.timeoutInterval = 10
 
@@ -137,6 +167,7 @@ enum AntigravityBridge {
             struct Bucket: Decodable {
                 let bucketId: String?
                 let displayName: String?
+                let window: String?
                 let remainingFraction: Double?
                 let resetTime: String?
             }
@@ -153,15 +184,38 @@ enum AntigravityBridge {
         else { return [] }
 
         return groups.flatMap { group -> [LimitWindow] in
-            (group.buckets ?? []).compactMap { bucket in
+            let buckets = group.buckets ?? []
+            let multiple = buckets.count > 1
+            let sortedBuckets = buckets.sorted { b1, b2 in
+                let b1Is5h = b1.window == "5h" || b1.displayName?.contains("Five Hour") == true || b1.bucketId?.contains("5h") == true
+                let b2Is5h = b2.window == "5h" || b2.displayName?.contains("Five Hour") == true || b2.bucketId?.contains("5h") == true
+                if b1Is5h && !b2Is5h { return true }
+                return false
+            }
+            return sortedBuckets.compactMap { bucket in
                 guard let remaining = bucket.remainingFraction,
                       remaining >= 0, remaining <= 1
                 else { return nil }
+
+                let groupName = group.displayName ?? "Usage"
+                let label: String
+                if multiple {
+                    let windowTag: String
+                    if let win = bucket.window {
+                        windowTag = win == "5h" ? " (5h)" : (win == "weekly" ? " (Weekly)" : " (\(win))")
+                    } else if let disp = bucket.displayName {
+                        windowTag = disp.contains("Five Hour") ? " (5h)" : (disp.contains("Weekly") ? " (Weekly)" : " (\(disp))")
+                    } else {
+                        windowTag = ""
+                    }
+                    label = "\(groupName)\(windowTag)"
+                } else {
+                    label = group.displayName ?? bucket.displayName ?? "Usage"
+                }
+
                 return LimitWindow(
-                    id: bucket.bucketId ?? group.displayName ?? "quota",
-                    // The group names the models; the bucket only ever says
-                    // "Weekly Limit Remaining", which is the same for both.
-                    label: group.displayName ?? bucket.displayName ?? "Usage",
+                    id: bucket.bucketId ?? label,
+                    label: label,
                     usedFraction: 1 - remaining,
                     resetsAt: bucket.resetTime.flatMap(AntigravityCredentials.parse)
                 )
