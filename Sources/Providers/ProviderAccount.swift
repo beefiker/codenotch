@@ -39,12 +39,15 @@ enum SignInRoute: Equatable {
     case openApp(bundleID: String, name: String)
     /// Nothing to launch; Claude Code is a command, not an application.
     case guidance(String)
+    /// An executable CLI command or switcher action that can be performed directly.
+    case command(title: String, explanation: String)
 
     var actionTitle: String? {
         switch self {
         case .modal(let name):     return "Sign in to \(name)"
         case .openApp(_, let name): return "Open \(name)"
         case .guidance:            return nil
+        case .command(let title, _): return title
         }
     }
 
@@ -53,6 +56,7 @@ enum SignInRoute: Equatable {
         case .modal(let name):      return "Sign in to \(name) to read this account."
         case .openApp(_, let name): return "Sign in with \(name) to read this account."
         case .guidance(let text):   return text
+        case .command(_, let explanation): return explanation
         }
     }
 
@@ -66,6 +70,7 @@ enum SignInRoute: Equatable {
         case .modal(let name):      return "Sign out in the \(name) window to use another account."
         case .openApp(_, let name): return "Switch accounts in \(name); the notch follows."
         case .guidance:             return "Switch accounts in the tool that owns it; the notch follows."
+        case .command(let title, _): return "\(title) to change active account."
         }
     }
 
@@ -79,6 +84,8 @@ enum SignInRoute: Equatable {
             return "You stay signed in to \(name) — end that session in \(name) itself."
         case .guidance:
             return "You stay signed in to the tool that owns the account."
+        case .command:
+            return "Account credentials remain managed by your external switcher."
         }
     }
 }

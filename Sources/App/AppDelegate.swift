@@ -60,11 +60,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // very first list it draws already excludes them. Constructed first,
             // it drew every provider from the archive and only dropped the
             // switched-off ones once the binding below delivered.
+            // Discovers all available accounts for Claude (via claude-swap or single OAuth)
+            // and Codex (via codex-auth or local rollout), plus Cursor and Antigravity.
+            let buildProviders: () -> [UsageProvider] = {
+                var list: [UsageProvider] = []
+
+                if ClaudeSwapDiscovery.isAvailable() {
+                    let swapProviders = ClaudeSwapDiscovery.providers()
+                    if !swapProviders.isEmpty {
+                        list.append(contentsOf: swapProviders)
+                    } else {
+                        list.append(ClaudeOAuthProvider())
+                    }
+                } else {
+                    list.append(ClaudeOAuthProvider())
+                }
+
+                list.append(CursorLocalProvider())
+
+                if CodexAuthDiscovery.isAvailable() {
+                    let authProviders = CodexAuthDiscovery.providers()
+                    if !authProviders.isEmpty {
+                        list.append(contentsOf: authProviders)
+                    } else {
+                        list.append(CodexLocalProvider())
+                    }
+                } else {
+                    list.append(CodexLocalProvider())
+                }
+
+                list.append(AntigravityProvider())
+                return list + webProviders
+            }
+
             let store = UsageStore(
-                providers: [ClaudeOAuthProvider(), CursorLocalProvider(),
-                            CodexLocalProvider(), AntigravityProvider()]
-                    + webProviders,
-                disconnected: preferences.disconnectedProviders
+                providers: buildProviders(),
+                disconnected: preferences.disconnectedProviders,
+                providerResolver: buildProviders
             )
 
             // The stored edge goes in before the panel is ever put up. The

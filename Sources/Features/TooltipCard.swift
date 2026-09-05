@@ -272,8 +272,6 @@ private struct ProviderTooltip: View {
     let snapshot: ProviderSnapshot
     let now: Date
 
-    /// Only worth saying when the numbers are not current. A remembered reading
-    /// has to be dated, or it quietly passes itself off as live.
     private var readingAge: String? {
         guard snapshot.hasReading, let since = snapshot.status.staleSince,
               since != .distantPast
@@ -281,9 +279,20 @@ private struct ProviderTooltip: View {
         return ElapsedCopy.ago(since: since, now: now)
     }
 
+    private var headerNote: String? {
+        var parts: [String] = []
+        if snapshot.isActive {
+            parts.append("Active")
+        }
+        if let readingAge {
+            parts.append(readingAge)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            TooltipHeader(title: "\(snapshot.displayName) Usage", note: readingAge) {
+            TooltipHeader(title: "\(snapshot.displayName) Usage", note: headerNote) {
                 ProviderGlyphView(glyph: snapshot.glyph)
                     .foregroundStyle(Palette.textPrimary)
             }

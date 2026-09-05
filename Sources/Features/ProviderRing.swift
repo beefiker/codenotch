@@ -20,6 +20,8 @@ struct ProviderRing: View {
     var activity: ActivitySummary?
     /// A fetch this cell asked for, in flight.
     var isRefreshing: Bool = false
+    var badge: String? = nil
+    var isActive: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var spin: Double = 0
@@ -66,6 +68,23 @@ struct ProviderRing: View {
 
             if let activity, activity.state != .idle {
                 ActivityArc(summary: activity)
+            }
+
+            if let badge {
+                Text(badge)
+                    .font(.system(size: Design.fontSize(capPixels: 16), weight: .bold, design: .rounded))
+                    .foregroundStyle(isActive ? Palette.ample : Palette.textSecondary)
+                    .padding(.horizontal, Design.px(6))
+                    .padding(.vertical, Design.px(2))
+                    .background(
+                        Capsule()
+                            .fill(Palette.notch)
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(isActive ? Palette.ample.opacity(0.85) : Palette.ringTrack, lineWidth: Design.px(2))
+                            )
+                    )
+                    .offset(x: NotchLayout.ringDiameter * 0.32, y: NotchLayout.ringDiameter * 0.32)
             }
         }
         .frame(width: NotchLayout.ringDiameter, height: NotchLayout.ringDiameter)
@@ -173,7 +192,9 @@ struct ProviderCell: View {
                 isStale: snapshot.status.isStale || !snapshot.hasReading,
                 isBlocked: snapshot.block != nil,
                 activity: activity,
-                isRefreshing: isRefreshing
+                isRefreshing: isRefreshing,
+                badge: snapshot.accountBadge,
+                isActive: snapshot.isActive
             )
             Text(percentText)
                 .font(Typography.percent)

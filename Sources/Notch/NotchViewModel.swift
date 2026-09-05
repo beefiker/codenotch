@@ -250,9 +250,25 @@ final class NotchViewModel: ObservableObject {
     }
 
     /// A provider with no activity source gets none, rather than borrowing
-    /// somebody else's.
+    /// somebody else's. Multi-account providers route to the active account.
     func activity(for providerID: String) -> ActivitySummary? {
-        ActivitySummary(sessions: sessions[providerID] ?? [])
+        if let live = sessions[providerID], !live.isEmpty {
+            return ActivitySummary(sessions: live)
+        }
+        let matchingSnapshot = snapshots.first(where: { $0.id == providerID })
+        if providerID.hasPrefix("claude") {
+            let isClaudeActive = matchingSnapshot?.isActive ?? (snapshots.filter { $0.id.hasPrefix("claude") }.count <= 1)
+            if isClaudeActive, let live = sessions["claude"], !live.isEmpty {
+                return ActivitySummary(sessions: live)
+            }
+        }
+        if providerID.hasPrefix("codex") {
+            let isCodexActive = matchingSnapshot?.isActive ?? (snapshots.filter { $0.id.hasPrefix("codex") }.count <= 1)
+            if isCodexActive, let live = sessions["codex"], !live.isEmpty {
+                return ActivitySummary(sessions: live)
+            }
+        }
+        return ActivitySummary(sessions: sessions[providerID] ?? [])
     }
 
     var hoveredSnapshot: ProviderSnapshot? {

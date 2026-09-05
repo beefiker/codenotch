@@ -394,6 +394,8 @@ private struct AccountRow: View {
             return NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil
         case .guidance:
             return false
+        case .command:
+            return true
         }
     }
 

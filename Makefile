@@ -3,6 +3,7 @@ export DEVELOPER_DIR := /Applications/Xcode.app/Contents/Developer
 PROJECT := Codenotch.xcodeproj
 SCHEME  := Codenotch
 DEST    := platform=macOS,arch=arm64
+CODE_SIGN_FLAGS ?= CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO
 
 .PHONY: gen build test run clean
 
@@ -11,11 +12,11 @@ gen:
 
 build: gen
 	xcodebuild -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST)' \
-		-configuration Debug build
+		-configuration Debug $(CODE_SIGN_FLAGS) build
 
 test: gen
 	xcodebuild -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST)' \
-		-configuration Debug test
+		-configuration Debug $(CODE_SIGN_FLAGS) test
 
 run: build
 	@APP=$$(xcodebuild -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST)' \

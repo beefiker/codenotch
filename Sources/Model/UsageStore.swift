@@ -10,7 +10,8 @@ final class UsageStore: ObservableObject {
     /// Providers with a fetch in flight, so the cell can show it happening.
     @Published private(set) var refreshing: Set<String> = []
 
-    private let providers: [UsageProvider]
+    private var providers: [UsageProvider]
+    var providerResolver: (() -> [UsageProvider])?
     /// Providers the user has switched off. They are not fetched at all — their
     /// credential is never read, which is the whole point of switching one off.
     /// Filtering the results afterwards would still touch the keychain.
@@ -56,9 +57,12 @@ final class UsageStore: ObservableObject {
         idleRefreshInterval: TimeInterval = 5 * 60,
         staleAfter: TimeInterval = 5 * 60,
         archive: UsageArchive = UsageArchive(),
-        disconnected: Set<String> = []
+        disconnected: Set<String> = [],
+        providerResolver: (() -> [UsageProvider])? = nil
     ) {
-        self.providers = providers
+        self.providerResolver = providerResolver
+        let initialProviders = providerResolver?() ?? providers
+        self.providers = initialProviders
         self.refreshInterval = refreshInterval
         self.idleRefreshInterval = idleRefreshInterval
         self.staleAfter = staleAfter
@@ -165,6 +169,9 @@ final class UsageStore: ObservableObject {
     }
 
     func refresh() async {
+        if let resolver = providerResolver {
+            self.providers = resolver()
+        }
         let live = providers.filter { !disconnected.contains($0.id) }
         refreshing = Set(live.map(\.id))
         defer { refreshing = [] }
@@ -234,6 +241,10 @@ final class UsageStore: ObservableObject {
     func signIn(providerID: String) -> Bool {
         guard let provider = providers.first(where: { $0.id == providerID }) else { return false }
 
+        if case .command = provider.signInRoute {
+            return openAccountSource(providerID: providerID)
+        }
+
         // Already holding a usable credential: connecting is the whole job, and
         // throwing up a sign-in window over a signed-in account is just noise.
         if provider.account() != nil {
@@ -281,6 +292,12 @@ final class UsageStore: ObservableObject {
             // Claude Code: nothing to open. The row's guidance is the whole
             // answer, so the sheet has to show it rather than pretend.
             return false
+        case .command:
+            provider.presentSignIn()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.refreshNow()
+            }
+            return true
         }
     }
 

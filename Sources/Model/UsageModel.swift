@@ -117,6 +117,38 @@ struct ProviderSnapshot: Identifiable, Equatable {
     /// Set when something is blocked right now. Deliberately separate from the
     /// windows: it is not a measurement, it is a door being shut.
     var block: UsageBlock?
+    /// Short slot or index badge displayed on the ring (e.g. "1", "2").
+    var accountBadge: String?
+    /// Whether this is the active account in a multi-account setup.
+    var isActive: Bool
+    /// Account label/email and plan details.
+    var accountDetail: String?
+
+    init(
+        id: String,
+        displayName: String,
+        glyph: ProviderGlyph,
+        fidelity: Fidelity,
+        status: ProviderStatus,
+        windows: [LimitWindow],
+        headlineID: String? = nil,
+        block: UsageBlock? = nil,
+        accountBadge: String? = nil,
+        isActive: Bool = false,
+        accountDetail: String? = nil
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.glyph = glyph
+        self.fidelity = fidelity
+        self.status = status
+        self.windows = windows
+        self.headlineID = headlineID
+        self.block = block
+        self.accountBadge = accountBadge
+        self.isActive = isActive
+        self.accountDetail = accountDetail
+    }
 
     /// The number on the cell: the provider's declared primary window — for
     /// Claude, the current session.

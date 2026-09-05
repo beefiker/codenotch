@@ -17,6 +17,7 @@ enum ResetCopy {
 
         let formatter = DateFormatter()
         formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
         formatter.locale = .current
 
         // A weekday only identifies a day inside the coming week. Codex's
