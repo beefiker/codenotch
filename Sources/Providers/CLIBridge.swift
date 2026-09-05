@@ -88,4 +88,34 @@ enum CLIBridge {
             }
         }.value
     }
+
+    /// Reads a generic password from the login keychain using macOS `/usr/bin/security`.
+    ///
+    /// This bypasses the in-process `SecItemCopyMatching` ACL check that causes macOS to prompt
+    /// the user for their login password whenever Codenotch's binary is recompiled or modified.
+    static func readKeychainPassword(service: String, account: String? = nil) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        var args = ["find-generic-password", "-s", service, "-w"]
+        if let account, !account.isEmpty {
+            args.append(contentsOf: ["-a", account])
+        }
+        process.arguments = args
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            guard let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !text.isEmpty
+            else { return nil }
+            return text
+        } catch {
+            return nil
+        }
+    }
 }

@@ -3,7 +3,8 @@ export DEVELOPER_DIR := /Applications/Xcode.app/Contents/Developer
 PROJECT := Codenotch.xcodeproj
 SCHEME  := Codenotch
 DEST    := platform=macOS,arch=arm64
-CODE_SIGN_FLAGS ?= CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO
+DEVELOPMENT_IDENTITY ?= $(shell security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Development/{print $$2; exit}')
+CODE_SIGN_FLAGS ?= CODE_SIGN_IDENTITY="$(if $(DEVELOPMENT_IDENTITY),$(DEVELOPMENT_IDENTITY),-)" CODE_SIGNING_REQUIRED=NO
 
 .PHONY: gen build test run clean
 
@@ -23,6 +24,7 @@ run: build
 		-configuration Debug -showBuildSettings 2>/dev/null \
 		| awk -F' = ' '/ BUILT_PRODUCTS_DIR/ {print $$2; exit}')/Codenotch.app; \
 	pkill -x Codenotch || true; \
+	sleep 0.5; \
 	open "$$APP"
 
 clean:

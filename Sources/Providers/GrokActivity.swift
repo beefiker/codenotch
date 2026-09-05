@@ -2,11 +2,11 @@ import Foundation
 
 /// How much Grok has actually been used, counted from its own session transcripts.
 ///
-/// SuperGrok / Grok Build CLI and Grok Bot log each turn into `~/.grok/sessions/<workspace>/<session>/events.jsonl`.
-/// When xAI does not publish a percentage rate limit directly, counting turns today provides
-/// an accurate, transparent local metric.
+/// SuperGrok / Grok Build CLI and Grok Bot log each turn into `~/.grok/sessions/<workspace>/<session>/events.jsonl`
+/// and write session-level statistics to `summary.json`.
 struct GrokActivity: Equatable {
     let requestsToday: Int
+    let totalTurns: Int
     let lastRequest: Date?
 
     static var defaultSessionsRoot: URL {
@@ -19,9 +19,17 @@ struct GrokActivity: Equatable {
         let type: String
     }
 
+    private struct SessionSummaryHead: Decodable {
+        let num_messages: Int?
+        let num_chat_messages: Int?
+        let last_active_at: String?
+        let updated_at: String?
+    }
+
     static func read(root: URL = defaultSessionsRoot, now: Date = Date()) -> GrokActivity {
         let manager = FileManager.default
         var today = 0
+        var total = 0
         var latest: Date?
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
@@ -29,7 +37,7 @@ struct GrokActivity: Equatable {
         guard let workspaces = try? manager.contentsOfDirectory(
             at: root, includingPropertiesForKeys: nil
         ) else {
-            return GrokActivity(requestsToday: 0, lastRequest: nil)
+            return GrokActivity(requestsToday: 0, totalTurns: 0, lastRequest: nil)
         }
 
         for workspace in workspaces {
@@ -42,13 +50,28 @@ struct GrokActivity: Equatable {
             ) else { continue }
 
             for sessionDir in sessionDirs {
+                // Read summary.json for total turns and latest activity
+                let summaryFile = sessionDir.appendingPathComponent("summary.json")
+                if let summaryData = try? Data(contentsOf: summaryFile),
+                   let summary = try? JSONDecoder().decode(SessionSummaryHead.self, from: summaryData) {
+                    let count = summary.num_messages ?? summary.num_chat_messages ?? 0
+                    total += count
+                    if let actStr = summary.last_active_at ?? summary.updated_at,
+                       let actDate = parseDate(actStr) {
+                        if latest == nil || actDate > latest! {
+                            latest = actDate
+                        }
+                    }
+                }
+
+                // Check events.jsonl for today's turns
                 let eventsFile = sessionDir.appendingPathComponent("events.jsonl")
                 guard let attrs = try? manager.attributesOfItem(atPath: eventsFile.path),
                       let modified = attrs[.modificationDate] as? Date
                 else { continue }
 
-                // Optimization: skip files not modified within the last 48 hours
-                if now.timeIntervalSince(modified) > 48 * 3600 {
+                // Only parse lines if modified within 36 hours
+                if now.timeIntervalSince(modified) > 36 * 3600 {
                     continue
                 }
 
@@ -68,7 +91,7 @@ struct GrokActivity: Equatable {
             }
         }
 
-        return GrokActivity(requestsToday: today, lastRequest: latest)
+        return GrokActivity(requestsToday: today, totalTurns: total, lastRequest: latest)
     }
 
     static func parseDate(_ text: String) -> Date? {

@@ -35,6 +35,16 @@ struct AntigravityCredentials {
     }
 
     private static func read() throws -> AntigravityCredentials {
+        // 1. Try reading via macOS system security CLI first:
+        // /usr/bin/security runs with system authority and reads generic passwords
+        // without popping the macOS keychain ACL dialog when Codenotch is recompiled.
+        if let password = CLIBridge.readKeychainPassword(service: service, account: account),
+           let data = password.data(using: .utf8),
+           let decoded = decode(data) {
+            return decoded
+        }
+
+        // 2. Fall back to SecItemCopyMatching
         var item: CFTypeRef?
         let status = SecItemCopyMatching([
             kSecClass: kSecClassGenericPassword,

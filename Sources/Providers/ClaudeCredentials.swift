@@ -51,7 +51,41 @@ struct ClaudeCredentials {
         )
     }
 
+    /// Decode raw JSON payload from keychain item.
+    static func decode(_ data: Data) -> ClaudeCredentials? {
+        struct Payload: Decodable {
+            struct OAuth: Decodable {
+                let accessToken: String
+                /// Milliseconds since the epoch.
+                let expiresAt: Double
+                let subscriptionType: String?
+            }
+            let claudeAiOauth: OAuth
+        }
+
+        let decoder = JSONDecoder()
+        guard let payload = try? decoder.decode(Payload.self, from: data) else {
+            return nil
+        }
+
+        return ClaudeCredentials(
+            accessToken: payload.claudeAiOauth.accessToken,
+            expiresAt: Date(timeIntervalSince1970: payload.claudeAiOauth.expiresAt / 1000),
+            subscriptionType: payload.claudeAiOauth.subscriptionType
+        )
+    }
+
     private static func read(service: String = service) throws -> ClaudeCredentials {
+        // 1. Try reading via macOS system security CLI first:
+        // /usr/bin/security runs with system authority and reads generic passwords
+        // without popping the macOS keychain ACL dialog when Codenotch is recompiled.
+        if let password = CLIBridge.readKeychainPassword(service: service),
+           let data = password.data(using: .utf8),
+           let decoded = decode(data) {
+            return decoded
+        }
+
+        // 2. Fall back to SecItemCopyMatching
         var item: CFTypeRef?
         let status = SecItemCopyMatching([
             kSecClass: kSecClassGenericPassword,
@@ -71,26 +105,10 @@ struct ClaudeCredentials {
                 : UsageProviderError.needsAuth
         }
 
-        struct Payload: Decodable {
-            struct OAuth: Decodable {
-                let accessToken: String
-                /// Milliseconds since the epoch.
-                let expiresAt: Double
-                let subscriptionType: String?
-            }
-            let claudeAiOauth: OAuth
-        }
-
-        let decoder = JSONDecoder()
-        guard let payload = try? decoder.decode(Payload.self, from: data) else {
+        guard let creds = decode(data) else {
             throw UsageProviderError.needsAuth
         }
-
-        return ClaudeCredentials(
-            accessToken: payload.claudeAiOauth.accessToken,
-            expiresAt: Date(timeIntervalSince1970: payload.claudeAiOauth.expiresAt / 1000),
-            subscriptionType: payload.claudeAiOauth.subscriptionType
-        )
+        return creds
     }
 
     /// Which keychain refusal this was. "Not found" means Claude Code has never

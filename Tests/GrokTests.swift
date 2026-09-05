@@ -125,8 +125,15 @@ final class GrokTests: XCTestCase {
         let eventsFile = sessionDir.appendingPathComponent("events.jsonl")
         try eventsContent.write(to: eventsFile, atomically: true, encoding: .utf8)
 
+        let summaryContent = """
+        {"info":{"id":"s1"},"num_messages":12,"last_active_at":"\(nowString)"}
+        """
+        let summaryFile = sessionDir.appendingPathComponent("summary.json")
+        try summaryContent.write(to: summaryFile, atomically: true, encoding: .utf8)
+
         let activity = GrokActivity.read(root: tempDir, now: now)
         XCTAssertEqual(activity.requestsToday, 2)
+        XCTAssertEqual(activity.totalTurns, 12)
         XCTAssertNotNil(activity.lastRequest)
     }
 
@@ -177,5 +184,28 @@ final class GrokTests: XCTestCase {
             now: future
         )
         XCTAssertTrue(staleSessions.isEmpty)
+    }
+
+    func testClaudeCredentialsDecode() {
+        let json = """
+        {
+          "claudeAiOauth": {
+            "accessToken": "sk-ant-test",
+            "expiresAt": 1788650000000,
+            "subscriptionType": "pro"
+          }
+        }
+        """
+        let data = json.data(using: .utf8)!
+        let creds = ClaudeCredentials.decode(data)
+        XCTAssertNotNil(creds)
+        XCTAssertEqual(creds?.accessToken, "sk-ant-test")
+        XCTAssertEqual(creds?.subscriptionType, "pro")
+    }
+
+    func testKeychainCLIBridgeExecution() {
+        // Test that reading a nonexistent service fails gracefully with nil without throwing
+        let result = CLIBridge.readKeychainPassword(service: "nonexistent-test-service-\(UUID().uuidString)")
+        XCTAssertNil(result)
     }
 }
