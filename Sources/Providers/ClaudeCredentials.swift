@@ -20,24 +20,38 @@ struct ClaudeCredentials {
     /// Read once, then held until the token expires — see `CredentialCache`.
     /// Claude Code rotates this roughly hourly, so this is about one keychain
     /// read an hour instead of two a minute.
-    private static let cache = CredentialCache<ClaudeCredentials> { $0.isExpired }
+    private static var caches: [String: CredentialCache<ClaudeCredentials>] = [:]
+    private static let lock = NSLock()
+
+    private static func cache(for serviceName: String) -> CredentialCache<ClaudeCredentials> {
+        lock.lock()
+        defer { lock.unlock() }
+        if let existing = caches[serviceName] {
+            return existing
+        }
+        let c = CredentialCache<ClaudeCredentials> { $0.isExpired }
+        caches[serviceName] = c
+        return c
+    }
 
     /// Forget the held copy. Call when the server rejects it: signing into a
     /// different account replaces the keychain item, and the copy in hand is
     /// then wrong despite not having expired.
-    static func forgetCached() { cache.forget() }
+    static func forgetCached(service: String = service) {
+        cache(for: service).forget()
+    }
 
     /// Reads whatever is stored, expired or not. Judging expiry is the caller's
     /// job, because "signed out" and "the token has aged out overnight" call for
     /// different behaviour and only one of them is worth alarming anyone about.
-    static func load() throws -> ClaudeCredentials {
-        try cache.value(
+    static func load(service: String = service) throws -> ClaudeCredentials {
+        try cache(for: service).value(
             itemModifiedAt: { KeychainItem.modifiedAt(service: service) },
-            reload: read
+            reload: { try read(service: service) }
         )
     }
 
-    private static func read() throws -> ClaudeCredentials {
+    private static func read(service: String = service) throws -> ClaudeCredentials {
         var item: CFTypeRef?
         let status = SecItemCopyMatching([
             kSecClass: kSecClassGenericPassword,

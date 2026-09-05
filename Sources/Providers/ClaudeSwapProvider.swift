@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import os
 
@@ -58,6 +59,24 @@ enum ClaudeSwapDiscovery {
         URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude-swap-backup")
     }
 
+    static func sessionDir(forSlot slot: Int, email: String, backupDir: URL) -> URL? {
+        let sessionsDir = backupDir.appendingPathComponent("sessions")
+        guard let items = try? FileManager.default.contentsOfDirectory(atPath: sessionsDir.path) else {
+            return nil
+        }
+        if let match = items.first(where: { $0.hasPrefix("\(slot)-") }) {
+            return sessionsDir.appendingPathComponent(match)
+        }
+        return nil
+    }
+
+    static func keychainService(forSessionDir sessionDir: URL) -> String {
+        let normalized = sessionDir.path.precomposedStringWithCanonicalMapping
+        let hash = SHA256.hash(data: Data(normalized.utf8))
+        let hex = hash.map { String(format: "%02x", $0) }.joined()
+        return "Claude Code-credentials-\(hex.prefix(8))"
+    }
+
     static func isAvailable(backupDir: URL = defaultBackupDirectory) -> Bool {
         let seqURL = backupDir.appendingPathComponent("sequence.json")
         return FileManager.default.fileExists(atPath: seqURL.path)
@@ -82,6 +101,30 @@ enum ClaudeSwapDiscovery {
             let email = record.email ?? "account-\(slot)"
             let isActive = (slot == activeSlot)
 
+            let shortName: String
+            if let alias = record.alias, !alias.isEmpty {
+                shortName = alias
+            } else if let user = email.split(separator: "@").first, !user.isEmpty {
+                shortName = String(user)
+            } else {
+                shortName = "#\(slot)"
+            }
+            let dispName = "Claude (\(shortName))"
+
+            let live: ClaudeOAuthProvider?
+            if isActive {
+                live = liveOAuthProvider ?? ClaudeOAuthProvider(id: "claude-swap-\(slot)", displayName: dispName)
+            } else if let sDir = sessionDir(forSlot: slot, email: email, backupDir: backupDir) {
+                let service = keychainService(forSessionDir: sDir)
+                live = ClaudeOAuthProvider(
+                    id: "claude-swap-\(slot)",
+                    displayName: dispName,
+                    serviceName: service
+                )
+            } else {
+                live = nil
+            }
+
             return ClaudeSwapAccountProvider(
                 slot: slot,
                 email: email,
@@ -89,7 +132,7 @@ enum ClaudeSwapDiscovery {
                 orgName: record.organizationName,
                 isActive: isActive,
                 backupDir: backupDir,
-                liveProvider: isActive ? (liveOAuthProvider ?? ClaudeOAuthProvider()) : nil
+                liveProvider: live
             )
         }
     }
@@ -166,10 +209,10 @@ actor ClaudeSwapAccountProvider: UsageProvider {
     }
 
     func fetchSnapshot() async throws -> ProviderSnapshot {
-        // If active, try the live Claude OAuth endpoint first
-        if isActive, let liveProvider {
+        // If a live provider is configured (active slot or session profile with keychain credentials), try it first
+        if let liveProvider {
             do {
-                var live = try await liveProvider.fetchSnapshot()
+                let live = try await liveProvider.fetchSnapshot()
                 return ProviderSnapshot(
                     id: id,
                     displayName: displayName,
@@ -180,11 +223,11 @@ actor ClaudeSwapAccountProvider: UsageProvider {
                     headlineID: "session",
                     block: live.block,
                     accountBadge: "\(slot)",
-                    isActive: true,
-                    accountDetail: "\(email) · Active"
+                    isActive: isActive,
+                    accountDetail: "\(email) · \(isActive ? "Active" : "Slot \(slot)")"
                 )
             } catch {
-                Log.usage.notice("claude-swap slot \(self.slot) active live fetch failed, falling back to cache: \(error)")
+                Log.usage.notice("claude-swap slot \(self.slot) live fetch failed, falling back to cache: \(error)")
             }
         }
 

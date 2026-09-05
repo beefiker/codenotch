@@ -8,9 +8,10 @@ import os
 /// unqualified. The endpoint is not a published API, though, so every failure
 /// path degrades to a status the UI can render honestly rather than to a guess.
 actor ClaudeOAuthProvider: UsageProvider {
-    nonisolated let id = "claude"
-    nonisolated let displayName = "Claude"
+    nonisolated let id: String
+    nonisolated let displayName: String
     nonisolated let glyph = ProviderGlyph.claude
+    nonisolated let serviceName: String
 
     private let endpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     private let session: URLSession
@@ -32,7 +33,16 @@ actor ClaudeOAuthProvider: UsageProvider {
 
     private let archive: UsageArchive
 
-    init(session: URLSession = .shared, archive: UsageArchive = UsageArchive()) {
+    init(
+        id: String = "claude",
+        displayName: String = "Claude",
+        serviceName: String = ClaudeCredentials.service,
+        session: URLSession = .shared,
+        archive: UsageArchive = UsageArchive()
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.serviceName = serviceName
         self.session = session
         self.archive = archive
         // Pick the back-off back up where the last run left it, so relaunching
@@ -87,7 +97,7 @@ actor ClaudeOAuthProvider: UsageProvider {
         if status == 401 || status == 403 {
             // Rejected but unexpired: the held copy is wrong, which is what
             // signing into a different account looks like from here.
-            ClaudeCredentials.forgetCached()
+            ClaudeCredentials.forgetCached(service: serviceName)
             // The cached token went stale mid-flight; re-read once in case
             // Claude Code has refreshed it since.
             credentials = nil
@@ -127,7 +137,7 @@ actor ClaudeOAuthProvider: UsageProvider {
         if let lastAuthFailure, Date().timeIntervalSince(lastAuthFailure) < authRetryDelay {
             throw UsageProviderError.needsAuth
         }
-        let fresh = try ClaudeCredentials.load()
+        let fresh = try ClaudeCredentials.load(service: serviceName)
         Log.usage.debug("read keychain token, expires \(fresh.expiresAt, privacy: .public)")
         // Expired is not signed out. Claude Code rotates this token whenever it
         // runs, and this app deliberately does not — minting one would mean
