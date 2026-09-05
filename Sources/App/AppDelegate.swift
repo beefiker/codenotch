@@ -90,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
 
                 list.append(AntigravityProvider())
+                list.append(GrokProvider())
                 return list + webProviders
             }
 
@@ -213,7 +214,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "claude": ClaudeSessionMonitor(),
             "cursor": CursorActivityMonitor(),
             "codex": CodexActivityMonitor(),
-            "gemini": AntigravityActivityMonitor()
+            "gemini": AntigravityActivityMonitor(),
+            "grok": GrokActivityMonitor()
         ]
         for (id, monitor) in monitors {
             monitor.sessionsPublisher
