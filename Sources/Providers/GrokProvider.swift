@@ -13,8 +13,19 @@ actor GrokProvider: UsageProvider {
     nonisolated let glyph = ProviderGlyph.grok
 
     private let userEndpoint = URL(string: "https://cli-chat-proxy.grok.com/v1/user")!
+    private let billingEndpoint = URL(string: "https://cli-chat-proxy.grok.com/v1/billing")!
     private let completionEndpoint = URL(string: "https://cli-chat-proxy.grok.com/v1/chat/completions")!
     private let session: URLSession
+
+    private struct BillingResponse: Decodable {
+        struct Config: Decodable {
+            let billingPeriodStart: String?
+            let billingPeriodEnd: String?
+        }
+        let config: Config?
+    }
+
+    private var cachedBillingReset: (resetsAt: Date?, fetchedAt: Date)?
 
     private struct RateLimitCache {
         let limitRequests: Int
@@ -110,8 +121,10 @@ actor GrokProvider: UsageProvider {
             }
         }
 
-        // 2. Query live rate limits from cli-chat-proxy
-        let limits = await fetchRateLimits(token: credentials.accessToken)
+        // 2. Query live rate limits and billing cycle from cli-chat-proxy
+        async let limitsTask = fetchRateLimits(token: credentials.accessToken)
+        async let billingTask = fetchBillingReset(token: credentials.accessToken)
+        let (limits, billingResetsAt) = await (limitsTask, billingTask)
 
         let activity = GrokActivity.read()
 
@@ -137,7 +150,8 @@ actor GrokProvider: UsageProvider {
                 label: "Requests · SuperGrok",
                 usedFraction: reqFraction,
                 remaining: max(0, limits.limitRequests - usedRequests),
-                used: usedRequests
+                used: usedRequests,
+                resetsAt: billingResetsAt
             )
         )
 
@@ -148,7 +162,8 @@ actor GrokProvider: UsageProvider {
                 label: "Tokens · SuperGrok",
                 usedFraction: tokFraction,
                 remaining: max(0, limits.limitTokens - usedTokens),
-                used: usedTokens
+                used: usedTokens,
+                resetsAt: billingResetsAt
             )
         )
 
@@ -168,7 +183,17 @@ actor GrokProvider: UsageProvider {
             )
         )
 
-        let detail = credentials.email.map { "SuperGrok · \($0)" } ?? "SuperGrok"
+        let resetCopy = billingResetsAt.map { ResetCopy.text(for: $0) }
+        var detailParts: [String] = []
+        if let email = credentials.email {
+            detailParts.append("SuperGrok · \(email)")
+        } else {
+            detailParts.append("SuperGrok")
+        }
+        if let resetCopy {
+            detailParts.append(resetCopy)
+        }
+        let detail = detailParts.joined(separator: " · ")
 
         return ProviderSnapshot(
             id: id,
@@ -235,5 +260,42 @@ actor GrokProvider: UsageProvider {
         )
         cachedLimits = fresh
         return fresh
+    }
+
+    private func fetchBillingReset(token: String) async -> Date? {
+        if let cached = cachedBillingReset, Date().timeIntervalSince(cached.fetchedAt) < 300 {
+            return cached.resetsAt
+        }
+
+        var req = URLRequest(url: billingEndpoint)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("xai-grok-cli", forHTTPHeaderField: "X-XAI-Token-Auth")
+        req.setValue("1.0.13", forHTTPHeaderField: "x-grok-client-version")
+        req.setValue("grok-shell", forHTTPHeaderField: "x-grok-client-identifier")
+        req.setValue("xai-grok-workspace/1.0.13", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 10
+
+        guard let (data, response) = try? await session.data(for: req),
+              let http = response as? HTTPURLResponse,
+              http.statusCode == 200,
+              let billing = try? JSONDecoder().decode(BillingResponse.self, from: data),
+              let endStr = billing.config?.billingPeriodEnd,
+              let date = GrokCredentials.parseDate(endStr)
+        else {
+            let fallback = Calendar.current.nextDate(
+                after: Date(),
+                matching: DateComponents(day: 1, hour: 0, minute: 0),
+                matchingPolicy: .nextTime
+            )
+            let result = cachedBillingReset?.resetsAt ?? fallback
+            if cachedBillingReset == nil, let result {
+                cachedBillingReset = (resetsAt: result, fetchedAt: Date())
+            }
+            return result
+        }
+
+        cachedBillingReset = (resetsAt: date, fetchedAt: Date())
+        return date
     }
 }

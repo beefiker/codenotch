@@ -208,4 +208,42 @@ final class GrokTests: XCTestCase {
         let result = CLIBridge.readKeychainPassword(service: "nonexistent-test-service-\(UUID().uuidString)")
         XCTAssertNil(result)
     }
+
+    func testBillingResetDateParsingAndFormatting() {
+        let billingJSON = """
+        {
+          "config": {
+            "monthlyLimit": { "val": 0 },
+            "used": { "val": 0 },
+            "onDemandCap": { "val": 0 },
+            "billingPeriodStart": "2026-09-01T00:00:00+00:00",
+            "billingPeriodEnd": "2026-10-01T00:00:00+00:00"
+          }
+        }
+        """
+        guard let data = billingJSON.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let config = dict["config"] as? [String: Any],
+              let endStr = config["billingPeriodEnd"] as? String,
+              let resetDate = GrokCredentials.parseDate(endStr)
+        else {
+            XCTFail("Failed to parse billing JSON")
+            return
+        }
+
+        // Validate date was parsed accurately
+        let calendar = Calendar(identifier: .gregorian)
+        var utc = calendar
+        utc.timeZone = TimeZone(secondsFromGMT: 0)!
+        let comps = utc.dateComponents([.year, .month, .day, .hour], from: resetDate)
+        XCTAssertEqual(comps.year, 2026)
+        XCTAssertEqual(comps.month, 10)
+        XCTAssertEqual(comps.day, 1)
+        XCTAssertEqual(comps.hour, 0)
+
+        // Validate ResetCopy formats this reset date appropriately
+        let fixedNow = utc.date(from: DateComponents(year: 2026, month: 9, day: 6, hour: 12))!
+        let resetCopy = ResetCopy.text(for: resetDate, now: fixedNow, calendar: utc)
+        XCTAssertTrue(resetCopy.contains("Oct 1") || resetCopy.contains("10월 1일"), "Expected Oct 1 reset copy, got: \(resetCopy)")
+    }
 }
