@@ -192,6 +192,7 @@ struct ProviderSnapshot: Identifiable, Equatable {
         case "codex":      return "Sign in to Codex to read your usage"
         case "gemini":     return "Sign in to Antigravity to read your usage"
         case "grok":       return "Sign in to Grok to read your usage"
+        case "ollama":     return "Sign in to Ollama to read your usage"
         default:           return "Sign in to \(displayName) to read your usage"
         }
     }

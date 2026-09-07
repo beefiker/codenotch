@@ -94,13 +94,20 @@ struct GrokActivity: Equatable {
         return GrokActivity(requestsToday: today, totalTurns: total, lastRequest: latest)
     }
 
-    static func parseDate(_ text: String) -> Date? {
-        let withFraction = ISO8601DateFormatter()
-        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = withFraction.date(from: text) { return date }
+    private static let withFractionFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        return plain.date(from: text)
+    private static let plainFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    static func parseDate(_ text: String) -> Date? {
+        if let date = withFractionFormatter.date(from: text) { return date }
+        return plainFormatter.date(from: text)
     }
 }

@@ -73,9 +73,13 @@ final class CodexActivityMonitor: ObservableObject, AgentActivityMonitor {
             candidates.append((id: "codex.\(rollout.lastPathComponent)",
                                name: "Codex", at: modified))
         }
-        if let desktop = CodexStore.newestDesktopThread(in: desktopStore) {
-            candidates.append((id: "codex.desktop", name: desktop.title,
-                               at: desktop.updatedAt))
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: desktopStore.path),
+           let fileModified = attrs[.modificationDate] as? Date,
+           now.timeIntervalSince(fileModified) <= staleAfter + 5 {
+            if let desktop = CodexStore.newestDesktopThread(in: desktopStore) {
+                candidates.append((id: "codex.desktop", name: desktop.title,
+                                   at: desktop.updatedAt))
+            }
         }
 
         guard let newest = candidates.max(by: { $0.at < $1.at }),

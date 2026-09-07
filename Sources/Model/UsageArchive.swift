@@ -15,6 +15,9 @@ struct UsageArchive {
         let windows: [LimitWindow]
         let fetchedAt: Date
         var headlineID: String? = nil
+        var accountBadge: String? = nil
+        var isActive: Bool? = nil
+        var accountDetail: String? = nil
     }
 
     private let defaults: UserDefaults
@@ -62,7 +65,10 @@ struct UsageArchive {
                 fidelity: entry.fidelity,
                 status: .stale(since: entry.fetchedAt),
                 windows: entry.windows,
-                headlineID: entry.headlineID
+                headlineID: entry.headlineID,
+                accountBadge: entry.accountBadge,
+                isActive: entry.isActive ?? false,
+                accountDetail: entry.accountDetail
             )
             result[entry.id] = (snapshot, entry.fetchedAt)
         }
@@ -78,7 +84,10 @@ struct UsageArchive {
                 fidelity: $0.snapshot.fidelity,
                 windows: $0.snapshot.windows,
                 fetchedAt: $0.fetchedAt,
-                headlineID: $0.snapshot.headlineID
+                headlineID: $0.snapshot.headlineID,
+                accountBadge: $0.snapshot.accountBadge,
+                isActive: $0.snapshot.isActive,
+                accountDetail: $0.snapshot.accountDetail
             )
         }
         guard let data = try? JSONEncoder().encode(entries) else { return }

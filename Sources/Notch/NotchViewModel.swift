@@ -268,6 +268,12 @@ final class NotchViewModel: ObservableObject {
                 return ActivitySummary(sessions: live)
             }
         }
+        if providerID.hasPrefix("ollama") {
+            let isOllamaActive = matchingSnapshot?.isActive ?? (snapshots.filter { $0.id.hasPrefix("ollama") }.count <= 1)
+            if isOllamaActive, let live = sessions["ollama"], !live.isEmpty {
+                return ActivitySummary(sessions: live)
+            }
+        }
         return ActivitySummary(sessions: sessions[providerID] ?? [])
     }
 
